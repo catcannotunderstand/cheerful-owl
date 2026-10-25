@@ -32,9 +32,10 @@ for p in Microsoft.App Microsoft.OperationalInsights; do
 done
 az group create -n "$RG" -l "$LOC" -o none
 
+# ログの保存先(Log Analytics)は作らない。保存に料金がかかるため。画面の「ログストリーム」でリアルタイムの出力は見られる
 echo "== 実行環境(初回は数分かかります)"
 az containerapp env show -n "$ENV_NAME" -g "$RG" -o none 2>/dev/null || \
-  az containerapp env create -n "$ENV_NAME" -g "$RG" -l "$LOC" -o none
+  az containerapp env create -n "$ENV_NAME" -g "$RG" -l "$LOC" --logs-destination none -o none
 
 SECRETS=(mcp-secret="$MCP_SECRET")
 [ -n "$KEYFILE" ] && SECRETS+=(gcs-key="$(jq -c . "$KEYFILE")")
