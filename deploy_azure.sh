@@ -22,6 +22,11 @@ ANTHROPIC_IPS="160.79.104.0/21"   # Claude のコネクタからの通信元(Ant
 STATE="$HOME/.voicevox-mcp.env"
 # shellcheck disable=SC1090
 [ -f "$STATE" ] && . "$STATE"
+# Cloud Shell のファイルが消えていても(ストレージなしのセッションなど)、Azure に登録済みの値を取り戻す
+if [ -z "${MCP_SECRET:-}" ]; then
+  MCP_SECRET=$(az containerapp secret show -n "$APP" -g "$RG" --secret-name mcp-secret \
+                 --query value -o tsv 2>/dev/null || true)
+fi
 MCP_SECRET="${MCP_SECRET:-$(tr -dc A-Za-z0-9 </dev/urandom | head -c 40)}"
 printf 'MCP_SECRET=%s\n' "$MCP_SECRET" > "$STATE"; chmod 600 "$STATE"
 
