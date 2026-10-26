@@ -128,25 +128,59 @@ store: Storage = GCSStorage() if STORAGE == "gcs" else LocalStorage()
 http = httpx.Client(base_url=VOICEVOX_URL, timeout=httpx.Timeout(300, connect=10))
 _speakers_cache: Optional[list] = None
 
-
-def wait_engine(timeout: float = 180) -> None:
-    """コンテナ起動直後は VOICEVOX がモデルを読み込み中なので、応答するまで待つ。"""
-    end = time.time() + timeout
-    while True:
-        try:
-            if http.get("/version", timeout=5).status_code == 200:
-                return
-        except httpx.HTTPError:
-            pass
-        if time.time() > end:
-            raise RuntimeError("VOICEVOX ENGINE が起動しません。しばらくしてからやり直してください")
-        time.sleep(2)
+# VOICEVOX は起動(モデルの読み込み)に時間がかかる。中継サーバーは先に 8080 番を開いて
+# Azure のヘルスチェックに応え、VOICEVOX の準備ができたかは別に見張る。
+PROCESS_STARTED = time.time()
+engine_ready = threading.Event()
+ENGINE_START_LIMIT = 300      # これ以上かかったら起動に失敗したとみなす(秒)
 
 
-def speakers() -> list:
+class EngineStarting(RuntimeError):
+    """VOICEVOX がまだ起動中。少し待ってからやり直せばよい。"""
+
+
+def engine_elapsed() -> int:
+    return int(time.time() - PROCESS_STARTED)
+
+
+def _engine_alive() -> bool:
+    try:
+        return http.get("/version", timeout=3).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _watch_engine() -> None:
+    while not _engine_alive():
+        time.sleep(1)
+    engine_ready.set()
+    log.info("VOICEVOX ENGINE ready (%ds after start)", engine_elapsed())
+
+
+threading.Thread(target=_watch_engine, daemon=True, name="engine-watch").start()
+
+
+def engine_state() -> dict:
+    if engine_ready.is_set():
+        return {"engine": "ready"}
+    return {"engine": "starting", "seconds_since_container_start": engine_elapsed(),
+            "hint": "VOICEVOX はコンテナの起動直後でモデルを読み込み中。通常1〜2分で準備できる"}
+
+
+def wait_engine(timeout: float = ENGINE_START_LIMIT) -> None:
+    """VOICEVOX の準備ができるまで待つ(合成ジョブの中で使う。ツールの呼び出しでは長く待たない)。"""
+    if not engine_ready.wait(timeout):
+        raise RuntimeError(f"VOICEVOX ENGINE が{int(timeout)}秒たっても起動しません。"
+                           "コンテナの再起動が必要かもしれません")
+
+
+def speakers(wait: float = ENGINE_START_LIMIT) -> list:
     global _speakers_cache
     if _speakers_cache is None:
-        wait_engine(90)
+        if not engine_ready.wait(wait):
+            raise EngineStarting(
+                f"VOICEVOX は起動中です(コンテナ起動から{engine_elapsed()}秒)。"
+                "30秒ほど待ってからもう一度呼んでください")
         r = http.get("/speakers")
         r.raise_for_status()
         _speakers_cache = r.json()
@@ -217,6 +251,7 @@ def to_mp3(pcm: bytes, rate: int, bitrate: str) -> bytes:
 # ---------------------------------------------------------------- ジョブ
 
 jobs: dict[str, dict] = {}
+IN_PROGRESS = ("queued", "starting_engine", "running", "encoding")
 work_lock = threading.Lock()   # CPUを取り合わないよう、合成は1ジョブずつ
 
 
@@ -224,9 +259,13 @@ def run_job(job_id: str, req: dict) -> None:
     job = jobs[job_id]
     try:
         with work_lock:
+            if not engine_ready.is_set():
+                job["status"] = "starting_engine"
+                wait_engine()
             job["status"] = "running"
-            wait_engine()
             style_id = req["speaker"]
+            if style_owner(style_id) is None:  # 起動中に受け付けたジョブは、ここで話者を確かめる
+                raise ValueError(f"speaker={style_id} は見つかりません。list_speakers で確かめてください")
             params = {k: v for k, v in {
                 "speedScale": req["speed_scale"], "pitchScale": req["pitch_scale"],
                 "intonationScale": req["intonation_scale"], "volumeScale": req["volume_scale"],
@@ -279,7 +318,9 @@ mcp = FastMCP(
     "VOICEVOX",
     instructions=(
         "日本語の音声合成(VOICEVOX)。長い文章は start_synthesis で段落の配列を渡してジョブを始め、"
-        "get_synthesis を数十秒おきに呼んで完了を待つ。完了すると MP3 のダウンロードURL(期限付き)と、"
+        "get_synthesis を数十秒おきに呼んで完了を待つ。コンテナは使わないとき止まっていて、"
+        "起動直後の1〜2分は VOICEVOX がモデルを読み込み中(engine=starting、status=starting_engine)。"
+        "故障ではないので、そのまま待つ。完了すると MP3 のダウンロードURL(期限付き)と、"
         "各段落の開始秒(paragraph_starts)、全体の長さ(duration)が返る。"
         "音声を公開するときは credit の表記(例: VOICEVOX:ずんだもん)を添えること。"
     ),
@@ -298,10 +339,11 @@ async def list_speakers() -> list[dict]:
 
 def _list_speakers() -> list[dict]:
     """使える話者(キャラクター)とスタイルの一覧。start_synthesis の speaker にはスタイルの id を渡す。"""
+    # 起動中なら長く待たずに「起動中」と返す(黙って待つと、呼ぶ側が故障と誤解しやすい)
     return [{"name": sp["name"],
              "styles": [{"name": st["name"], "id": st["id"]} for st in sp.get("styles", [])
                         if st.get("type", "talk") in TALK_TYPES]}
-            for sp in speakers()]
+            for sp in speakers(wait=10)]
 
 
 @mcp.tool()
@@ -333,7 +375,8 @@ async def start_synthesis(
         raise ValueError("paragraphs が空です")
     if len(paragraphs) > MAX_PARAGRAPHS or sum(map(len, paragraphs)) > MAX_TOTAL_CHARS:
         raise ValueError(f"長すぎます(段落{MAX_PARAGRAPHS}個・{MAX_TOTAL_CHARS}文字まで)")
-    if await asyncio.to_thread(style_owner, speaker) is None:
+    # VOICEVOX が起動中でもジョブは受け付ける(話者の確認はジョブの中で、起動を待ってから行う)
+    if engine_ready.is_set() and await asyncio.to_thread(style_owner, speaker) is None:
         raise ValueError(f"speaker={speaker} は見つかりません。list_speakers で確かめてください")
     if not re.fullmatch(r"(64|96|128|160|192)k", bitrate):
         raise ValueError("bitrate は 64k, 96k, 128k, 160k, 192k のどれか")
@@ -348,7 +391,7 @@ async def start_synthesis(
     asyncio.get_running_loop().run_in_executor(None, run_job, job_id, req)
     chars = sum(map(len, paragraphs))
     return {"job_id": job_id, "status": "queued", "paragraphs": len(paragraphs), "chars": chars,
-            "poll_after_seconds": 20,
+            **engine_state(), "poll_after_seconds": 20,
             "hint": "get_synthesis(job_id) を poll_after_seconds おきに呼んで完了を待つ"}
 
 
@@ -369,7 +412,8 @@ def get_synthesis(job_id: str) -> dict:
     if job.get("status") == "done":
         out["audio_url"] = store.url(job["audio_key"])
         out["audio_url_expires_in_hours"] = URL_HOURS
-    elif job.get("status") in ("queued", "running", "encoding"):
+    elif job.get("status") in IN_PROGRESS:
+        out.update(engine_state())
         out["poll_after_seconds"] = 20
     return out
 
@@ -380,12 +424,9 @@ app = mcp.streamable_http_app()
 
 
 async def health(_: Request):
-    try:
-        r = await asyncio.to_thread(http.get, "/version")
-        ok = r.status_code == 200
-    except httpx.HTTPError:
-        ok = False
-    return JSONResponse({"mcp": "ok", "voicevox": "ok" if ok else "starting"}, status_code=200 if ok else 503)
+    # 生きているかの確認用。VOICEVOX が起動中でも 200 を返す(Azure に再起動させないため)。
+    # VOICEVOX の状態は中身の "engine" で分かる
+    return JSONResponse({"mcp": "ok", **engine_state()})
 
 
 async def root(_: Request):

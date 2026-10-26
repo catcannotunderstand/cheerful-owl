@@ -49,7 +49,7 @@ async def main():
             while True:
                 await asyncio.sleep(0.5)
                 st = json.loads((await s.call_tool("get_synthesis", {"job_id": job["job_id"]})).content[0].text)
-                if st["status"] not in ("queued", "running", "encoding"):
+                if st["status"] not in ("queued", "starting_engine", "running", "encoding"):
                     break
             print("result:", json.dumps({k: st[k] for k in st if k != "audio_url"}, ensure_ascii=False))
             return st
