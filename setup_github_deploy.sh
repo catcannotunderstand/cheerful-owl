@@ -26,14 +26,20 @@ if [ -z "$SP_ID" ]; then
 fi
 
 echo "== このリポジトリの main ブランチからだけ使えるようにする"
-if [ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?name=='github-main'].name" -o tsv)" ]; then
-  az ad app federated-credential create --id "$APP_ID" --parameters "{
-    \"name\": \"github-main\",
-    \"issuer\": \"https://token.actions.githubusercontent.com\",
-    \"subject\": \"repo:${REPO}:ref:refs/heads/main\",
-    \"audiences\": [\"api://AzureADTokenExchange\"]
-  }" -o none
-fi
+# GitHub が名乗る形は2通りある。新しい形はアカウントとリポジトリの固有番号付き
+# (名前を変えたり、同じ名前で作り直したりしても、なりすませないようにするため)
+add_cred() {  # $1=名前 $2=subject
+  if [ -z "$(az ad app federated-credential list --id "$APP_ID" --query "[?name=='$1'].name" -o tsv)" ]; then
+    az ad app federated-credential create --id "$APP_ID" --parameters "{
+      \"name\": \"$1\",
+      \"issuer\": \"https://token.actions.githubusercontent.com\",
+      \"subject\": \"$2\",
+      \"audiences\": [\"api://AzureADTokenExchange\"]
+    }" -o none
+  fi
+}
+add_cred github-main     "repo:${REPO}:ref:refs/heads/main"
+add_cred github-main-ids "repo:catcannotunderstand@207208477/cheerful-owl@1433162507:ref:refs/heads/main"
 
 echo "== 権限は $RG の中だけ(ほかのリソースには触れない)"
 SCOPE="/subscriptions/${SUB}/resourceGroups/${RG}"
