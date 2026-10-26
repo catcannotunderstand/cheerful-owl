@@ -19,7 +19,7 @@ async def version(_):
 
 async def speakers(_):
     return JSONResponse([
-        {"name": "ずんだもん", "speaker_uuid": "x", "styles": [{"name": "ノーマル", "id": 3, "type": "talk"}]},
+        {"name": "ずんだもん", "speaker_uuid": "x", "styles": [{"name": "ノーマル", "id": 3, "type": "streaming_talk"}, {"name": "ハミング", "id": 3003, "type": "frame_decode"}]},
         {"name": "青山龍星", "speaker_uuid": "y", "styles": [{"name": "ノーマル", "id": 13, "type": "talk"}]},
     ])
 

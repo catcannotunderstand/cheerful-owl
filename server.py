@@ -60,6 +60,7 @@ PORT = int(os.getenv("PORT", "8080"))
 MAX_TOTAL_CHARS = 30000      # 1ジョブの文字数の上限(午後対策の回は約4,000字)
 MAX_PARAGRAPHS = 400
 SENTENCE_MAX = 120           # これより長い文は読点で分けて合成する
+TALK_TYPES = ("talk", "streaming_talk")   # 話し声のスタイル(歌声は除く)。新しい版は streaming_talk と返す
 
 if not re.fullmatch(r"[A-Za-z0-9_-]{24,}", MCP_SECRET):
     raise SystemExit("MCP_SECRET に24文字以上の英数字(と - _)を設定してください")
@@ -299,7 +300,7 @@ def _list_speakers() -> list[dict]:
     """使える話者(キャラクター)とスタイルの一覧。start_synthesis の speaker にはスタイルの id を渡す。"""
     return [{"name": sp["name"],
              "styles": [{"name": st["name"], "id": st["id"]} for st in sp.get("styles", [])
-                        if st.get("type", "talk") == "talk"]}
+                        if st.get("type", "talk") in TALK_TYPES]}
             for sp in speakers()]
 
 
