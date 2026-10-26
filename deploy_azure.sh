@@ -18,6 +18,11 @@ ENV_NAME="voicevox-env"
 APP="voicevox"
 ANTHROPIC_IPS="160.79.104.0/21"   # Claude のコネクタからの通信元(Anthropic公開のIP範囲)
 
+echo "== 準備(拡張機能のインストール。1〜2分かかります)"
+# 確認の質問で止まらないようにする(質問が出ても画面に見えず、待ち続けてしまうため)
+az config set extension.use_dynamic_install=yes_without_prompt >/dev/null 2>&1 || true
+az extension add -n containerapp --upgrade -y </dev/null
+
 # 秘密の文字列は初回に作って保存し、2回目以降も同じものを使う(URLが変わらないように)
 STATE="$HOME/.voicevox-mcp.env"
 # shellcheck disable=SC1090
@@ -25,13 +30,12 @@ STATE="$HOME/.voicevox-mcp.env"
 # Cloud Shell のファイルが消えていても(ストレージなしのセッションなど)、Azure に登録済みの値を取り戻す
 if [ -z "${MCP_SECRET:-}" ]; then
   MCP_SECRET=$(az containerapp secret show -n "$APP" -g "$RG" --secret-name mcp-secret \
-                 --query value -o tsv 2>/dev/null || true)
+                 --query value -o tsv </dev/null 2>/dev/null || true)
 fi
 MCP_SECRET="${MCP_SECRET:-$(tr -dc A-Za-z0-9 </dev/urandom | head -c 40)}"
 printf 'MCP_SECRET=%s\n' "$MCP_SECRET" > "$STATE"; chmod 600 "$STATE"
 
-echo "== 準備"
-az extension add -n containerapp --upgrade -y >/dev/null 2>&1
+echo "== サービスの登録(初回は数分かかります)"
 for p in Microsoft.App Microsoft.OperationalInsights; do
   az provider register -n "$p" --wait >/dev/null
 done
