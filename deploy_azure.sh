@@ -32,7 +32,7 @@ if [ -z "${MCP_SECRET:-}" ]; then
   MCP_SECRET=$(az containerapp secret show -n "$APP" -g "$RG" --secret-name mcp-secret \
                  --query value -o tsv </dev/null 2>/dev/null || true)
 fi
-MCP_SECRET="${MCP_SECRET:-$(tr -dc A-Za-z0-9 </dev/urandom | head -c 40)}"
+MCP_SECRET="${MCP_SECRET:-$(openssl rand -hex 20)}"   # 40文字のランダムな英数字
 printf 'MCP_SECRET=%s\n' "$MCP_SECRET" > "$STATE"; chmod 600 "$STATE"
 
 echo "== サービスの登録(初回は数分かかります)"
