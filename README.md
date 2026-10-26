@@ -52,14 +52,25 @@ GitHub のプロフィール → Packages → `cheerful-owl` → Package setting
 2. 名前は `VOICEVOX`、URL は手順2で表示されたもの。認証の設定は空のまま。
 3. チャットのツール一覧で VOICEVOX をオンにする。
 
-## 更新するとき
+## 更新するとき(自動)
 
-1. Claude がこのリポジトリにプッシュすると、GitHub Actions が新しいイメージを作る(数分)。
-2. Azure Cloud Shell で入れ替える:
-   ```
-   cd cheerful-owl && git pull && bash deploy_azure.sh <バケット名>
-   ```
-   URLの秘密の文字列は `~/.voicevox-mcp.env` に保存されていて変わらない。
+main にプッシュすると、GitHub Actions がイメージを作り、そのまま Azure のアプリを入れ替える(数分)。Cloud Shell での作業は要らない。
+進み具合はリポジトリの **Actions** タブで見られる。
+
+そのために、最初に1回だけ Azure Cloud Shell で次を実行し、表示された3行のIDを `.github/workflows/build.yml` の `env:` に書く(Claude に貼れば書いてくれる)。
+
+```
+cd ~ && rm -rf cheerful-owl
+git clone https://github.com/catcannotunderstand/cheerful-owl && cd cheerful-owl
+bash setup_github_deploy.sh
+```
+
+- Entra ID に「cheerful-owl-deploy」というアプリを登録し、**このリポジトリの main ブランチから実行されたときだけ**ログインできるようにする(OIDC。パスワードや鍵は作らない)。
+- 権限は **リソースグループ voicevox-rg の中だけ**(共同作成者)。ほかのリソースには触れない。
+- 3つのIDはパスワードではない。知られても、このリポジトリの main 以外からはログインできない。
+- やめるときは Entra ID のアプリの登録から「cheerful-owl-deploy」を削除する。
+
+手動で入れ替えたいときは、これまでどおり `bash deploy_azure.sh <バケット名>` でもよい。
 
 ## 守りの設定
 
@@ -94,7 +105,8 @@ GitHub のプロフィール → Packages → `cheerful-owl` → Package setting
 |---|---|
 | `server.py` | 中継サーバー(MCP) |
 | `Dockerfile`, `start.sh`, `requirements.txt` | VOICEVOX ENGINE のイメージに中継サーバーを同居させる |
-| `.github/workflows/build.yml` | main へのプッシュでイメージを作って ghcr.io に置く |
+| `.github/workflows/build.yml` | main へのプッシュでイメージを作って ghcr.io に置き、Azure のアプリを入れ替える |
+| `setup_github_deploy.sh` | GitHub Actions から Azure を操作できるようにする(1回だけ) |
 | `setup_gcs.sh` | Google Cloud のバケットと鍵を作る |
 | `deploy_azure.sh` | Azure Container Apps に配置する |
 | `test/` | 偽の VOICEVOX を使った動作確認 |
