@@ -11,9 +11,9 @@ on:
 
 env:
   # setup_github_deploy.sh が表示した値。パスワードではない(このリポジトリの main からしか使えない)
-  AZURE_CLIENT_ID: ""
-  AZURE_TENANT_ID: ""
-  AZURE_SUBSCRIPTION_ID: ""
+  AZURE_CLIENT_ID: "d6217f6e-fac2-4891-a10d-3a1062eebfb7"
+  AZURE_TENANT_ID: "73331780-2261-4d6e-8035-b6ab264b65ae"
+  AZURE_SUBSCRIPTION_ID: "3e675fc4-04d3-48c2-ab3a-d196daf8f4b3"
 
 concurrency:
   group: build-and-deploy
