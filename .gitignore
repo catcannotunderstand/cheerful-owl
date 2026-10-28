@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 gcs-key.json
 *.json.key
+node_modules/
+status-mcp/dist/

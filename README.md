@@ -72,6 +72,34 @@ bash setup_github_deploy.sh
 
 手動で入れ替えたいときは、これまでどおり `bash deploy_azure.sh <バケット名>` でもよい。
 
+## 状態・コストを見るコネクタ(status-mcp/)
+
+Claude が Azure の様子を見られるようにする、閲覧専用の小さなコネクタ。VOICEVOX とは別のアプリ(voicevox-status、0.25コア)として動く。
+
+| ツール | 内容 |
+|---|---|
+| `containerapp_status` | コンテナの今の状態、動いている版とイメージ、レプリカ |
+| `containerapp_revisions` | 入れ替えの履歴(自動デプロイが反映されたか) |
+| `containerapp_metrics` | 1時間ごとのリクエスト数・レプリカ数・再起動回数 |
+| `cost_summary` | 今月・先月・直近7日/30日のコスト(リソースグループ別、サービス別など) |
+| `containerapps_usage` | 今月の Container Apps の使用量(無料枠の消費) |
+| `budgets` | 予算と今の使用額・予測額 |
+
+- Azure へは、このアプリの**マネージドID**でアクセスする(パスワードや鍵は使わない)。
+- 権限は **voicevox-rg の閲覧者** と **サブスクリプションのコスト管理の閲覧者** だけ。止める・変えるといった操作はできない。ほかのリソースグループの中身(SQL サーバーなど)は見られない(コストの金額だけは見える)。
+- 調べられるアプリは voicevox と voicevox-status だけ(TARGET_APPS)。シークレット・環境変数の値・予算の通知先メールアドレスは返さない。
+- 入口は VOICEVOX と同じく、URLの秘密の文字列+ Claude の IP 範囲だけ。
+
+最初に1回だけ、Azure Cloud Shell で作る:
+
+```
+cd ~ && rm -rf cheerful-owl
+git clone https://github.com/catcannotunderstand/cheerful-owl && cd cheerful-owl
+bash setup_status_app.sh
+```
+
+表示された URL を claude.ai にカスタムコネクタとして登録する。以後の更新は main へのプッシュで自動。
+
 ## 守りの設定
 
 - 入口のURLに **40文字のランダムな文字列** が入っていて、知らない人は呼べない。
@@ -106,6 +134,8 @@ bash setup_github_deploy.sh
 | `server.py` | 中継サーバー(MCP) |
 | `Dockerfile`, `start.sh`, `requirements.txt` | VOICEVOX ENGINE のイメージに中継サーバーを同居させる |
 | `.github/workflows/build.yml` | main へのプッシュでイメージを作って ghcr.io に置き、Azure のアプリを入れ替える |
+| `status-mcp/` | 状態・コストを見るコネクタ(TypeScript)。`test/run.sh` で偽の Azure を相手に試せる |
+| `setup_status_app.sh` | 状態・コストを見るコネクタを作る(1回だけ) |
 | `setup_github_deploy.sh` | GitHub Actions から Azure を操作できるようにする(1回だけ) |
 | `setup_gcs.sh` | Google Cloud のバケットと鍵を作る |
 | `deploy_azure.sh` | Azure Container Apps に配置する |

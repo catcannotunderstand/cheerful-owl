@@ -52,8 +52,22 @@ jobs:
             ${{ steps.name.outputs.image }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=voicevox
+          cache-to: type=gha,mode=max,scope=voicevox
+
+      # 状態・コスト閲覧用の小さなサーバー(status-mcp/)。同じパッケージの status- タグに置く
+      - uses: docker/build-push-action@v6
+        with:
+          context: status-mcp
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.name.outputs.image }}:status-latest
+            ${{ steps.name.outputs.image }}:status-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=status
+          cache-to: type=gha,mode=max,scope=status
 
   deploy:
     needs: build
@@ -84,3 +98,14 @@ jobs:
             --image "${{ needs.build.outputs.image }}:${{ github.sha }}" -o none
           az containerapp revision list -n voicevox -g voicevox-rg \
             --query "[?properties.active].{name:name, image:properties.template.containers[0].image, state:properties.runningState}" -o table
+
+      - name: 状態・コスト閲覧用のアプリも入れ替える(作成済みのときだけ)
+        if: env.AZURE_CLIENT_ID != ''
+        run: |
+          if az containerapp show -n voicevox-status -g voicevox-rg -o none 2>/dev/null; then
+            az containerapp update -n voicevox-status -g voicevox-rg \
+              --image "${{ needs.build.outputs.image }}:status-${{ github.sha }}" -o none
+            echo "voicevox-status を入れ替えました"
+          else
+            echo "::notice::voicevox-status はまだ作られていません(setup_status_app.sh で作る)"
+          fi
